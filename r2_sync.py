@@ -48,16 +48,23 @@ def backup_immich(r2: S3Client) -> None:
 
 def backup_tree(r2: S3Client, base: pathlib.Path, r2_prefix: str) -> None:
 	'''back up base to r2_prefix'''
-	objs = frozenset(iter_objs(r2, r2_prefix))
+	objs = set(iter_objs(r2, r2_prefix))
 	log('got', len(objs), 'objects from', r2_prefix, 'in R2')
 
 	for rel in iter_files(base):
 		key = str(pathlib.Path(r2_prefix) / rel)
-		if key not in objs:
+		if key in objs:
+			objs.remove(key)
+		else:
 			log('uploading', rel)
 			with (base / rel).open('rb') as f:
 				if not DRY_RUN:
 					r2.upload_fileobj(f, 'backup', key)
+
+	for key in objs:
+		log('deleting', key)
+		if not DRY_RUN:
+			r2.delete_object(Bucket='backup', Key=key)
 
 def log(*o: object) -> None:
 	if VERBOSE:
