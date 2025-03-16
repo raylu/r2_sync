@@ -26,29 +26,35 @@ def main() -> None:
 
 	r2 = boto3.client('s3', endpoint_url=config['endpoint_url'],
 			aws_access_key_id=config['aws_access_key_id'], aws_secret_access_key=config['aws_secret_access_key'])
+	backup_immich(r2)
+	backup_tree(r2, pathlib.Path('/mnt/data/music'), 'music/')
 
-	objs = frozenset(iter_objs(r2))
-	log('got', len(objs), 'objects from R2')
-
-	base = pathlib.Path('/mnt/data/immich/library/upload')
-	for rel in iter_files(base):
-		key = str(pathlib.Path('immich') / rel)
-		if key not in objs:
-			log('uploading', rel)
-			with (base / rel).open('rb') as f:
-				r2.upload_fileobj(f, 'backup', key)
+def backup_immich(r2: S3Client) -> None:
+	backup_tree(r2, pathlib.Path('/mnt/data/immich/library/upload'), 'immich/')
 
 	files = sorted(pathlib.Path('/mnt/data/immich/library/backups').iterdir())
 	log('uploading DB backup', files[-1])
 	with files[-1].open('rb') as f:
 		r2.upload_fileobj(f, 'backup', 'immich/db-backup.sql.gz')
 
+def backup_tree(r2: S3Client, base: pathlib.Path, r2_prefix: str) -> None:
+	'''back up base to r2_prefix'''
+	objs = frozenset(iter_objs(r2, r2_prefix))
+	log('got', len(objs), 'objects from', r2_prefix, 'in R2')
+
+	for rel in iter_files(base):
+		key = str(pathlib.Path(r2_prefix) / rel)
+		if key not in objs:
+			log('uploading', rel)
+			with (base / rel).open('rb') as f:
+				r2.upload_fileobj(f, 'backup', key)
+
 def log(*o: object) -> None:
 	if VERBOSE:
 		print(*o)
 
-def iter_objs(r2: S3Client) -> typing.Iterator[str]:
-	for page in r2.get_paginator('list_objects_v2').paginate(Bucket='backup', Prefix='immich/'):
+def iter_objs(r2: S3Client, prefix: str) -> typing.Iterator[str]:
+	for page in r2.get_paginator('list_objects_v2').paginate(Bucket='backup', Prefix=prefix):
 		for obj in page['Contents']: # type: ignore[reportTypedDictNotRequiredAccess]
 			yield obj['Key'] # type: ignore[reportTypedDictNotRequiredAccess]
 
